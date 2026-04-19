@@ -1,0 +1,7 @@
+Allows you to favorite armor, accessories, vanity items, and dyes, making them carry over to empty equipment slots when swapping loadouts.
+Currently incompatible with Extended Equipment Loadouts, sorry.
+
+v1.01: Vanity now properly visually clears when swapping loadouts. No longer deletes items when used with Extended Equipment Loadouts. Added localizations. 
+
+Developed by MingCat
+Russian localization by Alino, other localizations made by machine translation.
