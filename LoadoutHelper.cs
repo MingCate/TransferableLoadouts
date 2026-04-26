@@ -5,7 +5,7 @@ using Terraria.ModLoader;
 using Terraria.ModLoader.Default;
 
 // Replace with your mod's namespace
-namespace TransferableLoadouts; // TODO CHANGE
+namespace TransferableLoadouts;
 
 /// <summary>
 /// This file is intended for mods which wish to support Extra Equipment Loadouts. It provides alternatives to <see cref="Player.Loadouts"/>, <see cref="Player.CurrentLoadoutIndex"/>, and <see cref="Player.TrySwitchingLoadout(int)"/> that additionally call ExtraEquipmentLoadouts if it is loaded.
@@ -166,19 +166,29 @@ public static class LoadoutHelper
         }
 
         /// <summary>
+        /// Gets the current <see cref="ModAccessorySlot"/> contents for <paramref name="player"/>. This is unrelated to loadouts, but it is provided as a convenience method to be used with <see cref="GetModLoaderLoadoutSlots(Player, int)"/>.
+        /// </summary>
+        /// <seealso cref="GetModLoaderLoadoutSlots(Player, int)"/>
+        public static IModLoaderSlotsView GetModLoaderCurrentSlots(Player player)
+        {
+            return ModLoaderSlotsViewImpl.OfCurrentPlayerItems(player.GetModPlayer<ModAccessorySlotPlayer>());
+        }
+
+        /// <summary>
         /// Gets a view into the slots storing <see cref="ModAccessorySlot"/> items in the loadout <paramref name="index"/>.
         /// This will work even if Extra Equipment Loadouts is not loaded.
         /// </summary>
         /// <remarks>As tModLoader does not make the <see cref="ModAccessorySlotPlayer.ExEquipmentLoadout"/> class <see langword="public"/>, this returns a proxy type with references to relevant fields from the object.</remarks>
         /// <exception cref="IndexOutOfRangeException">if <paramref name="index"/> is greater than <see cref="TotalLoadouts"/></exception>
-        public static IModLoaderEquipmentLoadoutView GetModLoaderLoadout(Player player, int index)
+        /// <seealso cref="GetModLoaderCurrentSlots(Player)"/>
+        public static IModLoaderSlotsView GetModLoaderLoadoutSlots(Player player, int index)
         {
             return index switch
             {
                 < VANILLA_LOADOUTS
-                    => ModLoaderEquipmentLoadoutViewImpl.OfModLoaderLoadout(ReflectDefaultModLoaderLoadout(player, index)),
+                    => ModLoaderSlotsViewImpl.OfModLoaderLoadout(ReflectDefaultModLoaderLoadout(player, index)),
                 >= VANILLA_LOADOUTS when TryGetExtraLoadouts(out var mod)
-                    => ModLoaderEquipmentLoadoutViewImpl.OfModLoaderLoadout(mod.Call("GetExtraLoadoutModLoader.0", player, index - VANILLA_LOADOUTS)),
+                    => ModLoaderSlotsViewImpl.OfModLoaderLoadout(mod.Call("GetExtraLoadoutModLoader.0", player, index - VANILLA_LOADOUTS)),
                 _
                     => throw new IndexOutOfRangeException($"Index {index} out of bounds {TotalLoadouts()}"),
             };
@@ -199,54 +209,85 @@ public static class LoadoutHelper
         /// This is a "view" into a <see cref="ModAccessorySlotPlayer.ExEquipmentLoadout"/>, a type which is <see langword="internal"/> to tModLoader by default.
         /// It does not provide methods for swapping, but can be used to access the items in <see cref="ModAccessorySlot"/>s in other loadouts.
         /// </summary>
-        public interface IModLoaderEquipmentLoadoutView
+        public interface IModLoaderSlotsView
         {
             Item[] Items { get; }
             Item[] Dye { get; }
             bool[] Hide { get; }
+
+            ArraySegment<Item> FunctionalItems { get => Items[0..(Items.Length / 2)]; }
+            ArraySegment<Item> VanityItems { get => Items[(Items.Length / 2)..(Items.Length)]; }
         }
 
         /// <summary>
         /// Internal note: we use a public interface and private implementation as I don't want this type to be constructable by users of LoadoutHelper;
-        /// I want instances of it to only be obtainable via <see cref="GetModLoaderLoadout(Player, int)"/>
+        /// I want instances of it to only be obtainable via <see cref="GetModLoaderLoadoutSlots(Player, int)"/>
         /// </summary>
-        private class ModLoaderEquipmentLoadoutViewImpl : IModLoaderEquipmentLoadoutView
+        private class ModLoaderSlotsViewImpl : IModLoaderSlotsView
         {
             public Item[] Items { get; init; }
             public Item[] Dye { get; init; }
             public bool[] Hide { get; init; }
 
+            private static readonly FieldInfo F_ModAccessorySlotPlayer_exAccessorySlot = typeof(ModAccessorySlotPlayer).GetField("exAccessorySlot", BindingFlags.NonPublic | BindingFlags.Instance);
+            private static readonly FieldInfo F_ModAccessorySlotPlayer_exDyesAccessory = typeof(ModAccessorySlotPlayer).GetField("exDyesAccessory", BindingFlags.NonPublic | BindingFlags.Instance);
+            private static readonly FieldInfo F_ModAccessorySlotPlayer_exHideAccessory = typeof(ModAccessorySlotPlayer).GetField("exHideAccessory", BindingFlags.NonPublic | BindingFlags.Instance);
+            public static ModLoaderSlotsViewImpl OfCurrentPlayerItems(ModAccessorySlotPlayer player)
+            {
+                if (F_ModAccessorySlotPlayer_exAccessorySlot is null)
+                {
+                    throw new Exception("Could not find ModAccessorySlotPlayer::exAccessorySlot");
+                }
+
+                if (F_ModAccessorySlotPlayer_exDyesAccessory is null)
+                {
+                    throw new Exception("Could not find ModAccessorySlotPlayer::exDyesAccessory");
+                }
+
+                if (F_ModAccessorySlotPlayer_exHideAccessory is null)
+                {
+                    throw new Exception("Could not find ModAccessorySlotPlayer::exHideAccessory");
+                }
+
+                return new()
+                {
+                    Items = (Item[])F_ModAccessorySlotPlayer_exAccessorySlot.GetValue(player),
+                    Dye = (Item[])F_ModAccessorySlotPlayer_exDyesAccessory.GetValue(player),
+                    Hide = (bool[])F_ModAccessorySlotPlayer_exHideAccessory.GetValue(player)
+                };
+            }
+
             private static readonly Type T_ModAccessorySlotPlayer_ExEquipmentLoadout = typeof(ModAccessorySlotPlayer).GetNestedType("ExEquipmentLoadout", BindingFlags.NonPublic);
-            private static readonly PropertyInfo F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExAccessorySlot = T_ModAccessorySlotPlayer_ExEquipmentLoadout?.GetProperty("ExAccessorySlot");
-            private static readonly PropertyInfo F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExDyesAccessory = T_ModAccessorySlotPlayer_ExEquipmentLoadout?.GetProperty("ExDyesAccessory");
-            private static readonly PropertyInfo F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExHideAccessory = T_ModAccessorySlotPlayer_ExEquipmentLoadout?.GetProperty("ExHideAccessory");
-            public static ModLoaderEquipmentLoadoutViewImpl OfModLoaderLoadout(object exEquipmentLoadout)
+            private static readonly PropertyInfo P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExAccessorySlot = T_ModAccessorySlotPlayer_ExEquipmentLoadout?.GetProperty("ExAccessorySlot");
+            private static readonly PropertyInfo P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExDyesAccessory = T_ModAccessorySlotPlayer_ExEquipmentLoadout?.GetProperty("ExDyesAccessory");
+            private static readonly PropertyInfo P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExHideAccessory = T_ModAccessorySlotPlayer_ExEquipmentLoadout?.GetProperty("ExHideAccessory");
+            public static ModLoaderSlotsViewImpl OfModLoaderLoadout(object exEquipmentLoadout)
             {
                 if (T_ModAccessorySlotPlayer_ExEquipmentLoadout is null)
                 {
                     throw new Exception("Could not find ModAccessorySlotPlayer::ExEquipmentLoadout");
                 }
 
-                if (F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExAccessorySlot is null)
+                if (P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExAccessorySlot is null)
                 {
                     throw new Exception("Could not find ModAccessorySlotPlayer::ExEquipmentLoadout::ExAccessorySlot");
                 }
 
-                if (F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExDyesAccessory is null)
+                if (P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExDyesAccessory is null)
                 {
                     throw new Exception("Could not find ModAccessorySlotPlayer::ExEquipmentLoadout::ExDyesAccessory");
                 }
 
-                if (F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExHideAccessory is null)
+                if (P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExHideAccessory is null)
                 {
                     throw new Exception("Could not find ModAccessorySlotPlayer::ExEquipmentLoadout::ExHideAccessory");
                 }
 
                 return new()
                 {
-                    Items = (Item[])F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExAccessorySlot.GetValue(exEquipmentLoadout),
-                    Dye = (Item[])F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExDyesAccessory.GetValue(exEquipmentLoadout),
-                    Hide = (bool[])F_ModAccessorySlotPlayer_ExEquipmentLoadout_ExHideAccessory.GetValue(exEquipmentLoadout)
+                    Items = (Item[])P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExAccessorySlot.GetValue(exEquipmentLoadout),
+                    Dye = (Item[])P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExDyesAccessory.GetValue(exEquipmentLoadout),
+                    Hide = (bool[])P_ModAccessorySlotPlayer_ExEquipmentLoadout_ExHideAccessory.GetValue(exEquipmentLoadout)
                 };
             }
         }

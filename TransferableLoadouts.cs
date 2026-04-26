@@ -5,6 +5,7 @@ using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
 using ReLogic.Content;
 using System;
+using System.CodeDom;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -91,6 +92,7 @@ namespace TransferableLoadouts
                 Logger.Info("Inserted CopyLoadoutFavoritesForVanillaSlots() call into Player::TrySwitchingLoadout().");
 
                 // We have to use the ILHook class because we are patching an internal tModLoader class which they do not hookgen IL_* classes for
+                // The ILHook instance needs to be kept around as long as the mod is unloaded, as it is automatically unapplied when garbage collected
                 Hook_ModAccessorySlotPlayer_OnEquipmentLoadoutSwitched = new ILHook(typeof(ModAccessorySlotPlayer).GetMethod(nameof(ModAccessorySlotPlayer.OnEquipmentLoadoutSwitched)), OnEquipmentLoadoutSwitched_CallCopyFavorites);
                 Logger.Info("Inserted CopyLoadoutFavoritesForModLoaderSlots() call into ModAccessorySlotPlayer::OnEquipmentLoadoutSwitched().");
             }
@@ -141,7 +143,6 @@ namespace TransferableLoadouts
         {
             int numLoadouts = LoadoutHelper.TotalLoadouts();
 
-            /* ---- VANILLA LOADOUTS ---- */
             // Fill empty slots with first valid favorited items
             for (int i = 0; i < player.armor.Length; i++)
             {
@@ -194,8 +195,6 @@ namespace TransferableLoadouts
         public void CopyLoadoutFavoritesForModLoaderSlots(Player player)
         {
             int numLoadouts = LoadoutHelper.TotalLoadouts();
-
-            /* ---- MODDED LOADOUTS ---- */
             var modPlayer = player.GetModPlayer<ModAccessorySlotPlayer>();
             // tML creates unloaded slot entries at the end of the array so that players don't loose their items when they disable a mod that adds accessory slots
             // For consistency, we only want to deal with loaded slots.
@@ -210,7 +209,7 @@ namespace TransferableLoadouts
                 {
                     for (int j = 0; j < numLoadouts; j++)
                     {
-                        var loadout = LoadoutHelper.Advanced.GetModLoaderLoadout(player, j);
+                        var loadout = LoadoutHelper.Advanced.GetModLoaderLoadoutSlots(player, j);
                         Item potentialItem = loadout.Items[i];
                         if (potentialItem.IsAir || !potentialItem.favorited) continue;
 
@@ -232,7 +231,7 @@ namespace TransferableLoadouts
                 {
                     for (int j = 0; j < numLoadouts; j++)
                     {
-                        var loadout = LoadoutHelper.Advanced.GetModLoaderLoadout(player, j);
+                        var loadout = LoadoutHelper.Advanced.GetModLoaderLoadoutSlots(player, j);
                         int vanityOffset = loadout.Items.Length / 2;
                         Item potentialItem = loadout.Items[i + vanityOffset];
                         if (potentialItem.IsAir || !potentialItem.favorited) continue;
@@ -255,7 +254,7 @@ namespace TransferableLoadouts
                 {
                     for (int j = 0; j < numLoadouts; j++)
                     {
-                        var loadout = LoadoutHelper.Advanced.GetModLoaderLoadout(player, j);
+                        var loadout = LoadoutHelper.Advanced.GetModLoaderLoadoutSlots(player, j);
                         Item potentialItem = loadout.Dye[i];
                         if (potentialItem.IsAir || !potentialItem.favorited) continue;
 
@@ -395,8 +394,218 @@ namespace TransferableLoadouts
     }
     public class SaveFavoritedItems : ModPlayer //messing with vanilla I/O seems like a horrible idea
     {
+        public const int CurrentDataVersion = 1;
+        public const string DataVersionKey = "version";
+        public const string DataTagKey = "data";
+
+        public const string VanillaLoadoutKey = "vanilla";
+        public const string ModLoaderLoadoutKey = "modLoader";
+
+        public const string LoadoutKeyPrefix = "loadout";
+
+        public const string VanillaArmorKey = "armor";
+        public const string VanillaDye = "dye";
+
+        public const string ModLoaderFunctionalKey = "functional";
+        public const string ModLoaderVanityKey = "vanity";
+        public const string ModLoaderDyeKey = "dye";
+
+        private Dictionary<int, TagCompound> UnloadedLoadoutFavoriteData = new();
+
+        // ModAccessorySlotPlayer::slots stores all slots on the player, which is not necessarily just the loaded slots! It also includes unloaded slots that still have items
+        // There is no other way to access this data, so we need to get it via reflection
+        private static readonly FieldInfo F_ModAccessorySlotPlayer_slots = typeof(ModAccessorySlotPlayer).GetField("slots", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        public override void SaveData(TagCompound tag)// this WILL run when the game autosaves! it's not the same as onworldunload!
+        {
+            tag[DataVersionKey] = CurrentDataVersion;
+            var saveData = new TagCompound();
+
+            int numLoadouts = LoadoutHelper.TotalLoadouts();
+            var modLoaderSlots = F_ModAccessorySlotPlayer_slots?.GetValue(Player.GetModPlayer<ModAccessorySlotPlayer>()) as Dictionary<string, int>;
+
+            if (modLoaderSlots is null)
+            {
+                Mod.Logger.Error("Could not access ModAccessorySlotPlayer::slots. Modded accessory slots cannot be saved");
+            }
+
+            for (int i = 0; i < numLoadouts; i++)
+            {
+                var loadoutTag = new TagCompound();
+
+                var (vanillaArmor, vanillaDye) = GetVanillaItemsForLoadout(i);
+                var modLoaderItems = GetModLoaderItemsForLoadout(i);
+
+                var vanillaFavArmor = vanillaArmor.Select(item => item.favorited).ToList();
+                var vanillaFavDye = vanillaDye.Select(item => item.favorited).ToList();
+                loadoutTag[VanillaLoadoutKey] = new TagCompound()
+                {
+                    { VanillaArmorKey, vanillaFavArmor },
+                    { VanillaDye, vanillaFavDye },
+                };
+
+                if (modLoaderSlots is null)
+                {
+                    continue;
+                }
+
+                var modLoaderTag = new TagCompound();
+
+                foreach ((var slotName, int index) in modLoaderSlots)
+                {
+                    modLoaderTag[slotName] = new TagCompound()
+                    {
+                        { ModLoaderFunctionalKey, modLoaderItems.FunctionalItems[index].favorited },
+                        { ModLoaderVanityKey, modLoaderItems.VanityItems[index].favorited },
+                        { ModLoaderDyeKey, modLoaderItems.Dye[index].favorited }
+                    };
+                }
+
+                loadoutTag[ModLoaderLoadoutKey] = modLoaderTag;
+
+                saveData[LoadoutKeyPrefix + i] = loadoutTag;
+            }
+
+            // Reproduce unloaded loadout favorite data so that it isn't lost
+            foreach ((int index, TagCompound data) in UnloadedLoadoutFavoriteData)
+            {
+                saveData[LoadoutKeyPrefix + index] = data;
+            }
+
+            tag[DataTagKey] = saveData;
+        }
+
         public override void LoadData(TagCompound tag)
         {
+            // If there isn't a data version saved, that indicates that this save file was made before save data versioning as implemented
+            if (!tag.TryGet<int>(DataVersionKey, out var savedDataVersion))
+            {
+                LoadData_0(tag);
+                return;
+            }
+
+            if (!tag.TryGet<TagCompound>(DataTagKey, out var dataTag))
+            {
+                // This should never happen, but we want to catch this case and log an error in case it does
+                Mod.Logger.Error($"while loading player {Player.name}: tag contains data version ({savedDataVersion}) but no data tag!");
+                return;
+            }
+
+            switch (savedDataVersion)
+            {
+                case 1:
+                    LoadData_1(dataTag);
+                    break;
+                default:
+                    Mod.Logger.Error($"while loading player {Player.name}: unsupported data version {savedDataVersion}!");
+                    break;
+            }
+        }
+
+        private void LoadData_1(TagCompound dataTag)
+        {
+            void ApplyFavoriteList(IList<bool> favorited, Item[] toItemArray)
+            {
+                if (favorited.Count != toItemArray.Length)
+                {
+                    Mod.Logger.Warn($"Applying a favorite list to an item array of a different length (favorite list: {favorited.Count},  item array:{toItemArray.Length})");
+                }
+
+                int len = int.Min(favorited.Count, toItemArray.Length);
+                for (int i = 0; i < len; i++)
+                {
+                    toItemArray[i].favorited = favorited[i];
+                }
+            }
+
+            // Only try to load as many loadouts as currently exist
+            int numLoadouts = LoadoutHelper.TotalLoadouts();
+            var modLoaderSlots = F_ModAccessorySlotPlayer_slots?.GetValue(Player.GetModPlayer<ModAccessorySlotPlayer>()) as Dictionary<string, int>;
+
+            if (modLoaderSlots is null)
+            {
+                Mod.Logger.Error("Could not access ModAccessorySlotPlayer::slots. Modded accessory slots cannot be saved");
+            }
+
+            for (int i = 0; i < numLoadouts; i++)
+            {
+                if (!dataTag.TryGet<TagCompound>(LoadoutKeyPrefix + i, out var loadoutTag))
+                {
+                    continue;
+                }
+
+                var (vanillaArmor, vanillaDye) = GetVanillaItemsForLoadout(i);
+                var modLoaderItems = GetModLoaderItemsForLoadout(i);
+
+                // Load vanilla loadout favourites
+                var vanillaTag = loadoutTag.Get<TagCompound>(VanillaLoadoutKey);
+                var vanillaFavArmor = vanillaTag.GetList<bool>(VanillaArmorKey);
+                var vanillaFavDye = vanillaTag.GetList<bool>(VanillaDye);
+
+
+                ApplyFavoriteList(vanillaFavArmor, vanillaArmor);
+                ApplyFavoriteList(vanillaFavDye, vanillaDye);
+
+                if (modLoaderSlots is null)
+                {
+                    continue;
+                }
+
+                // Load ModAccessorySlot loadout favourites
+                var modLoaderTag = loadoutTag.Get<TagCompound>(ModLoaderLoadoutKey);
+
+
+                foreach ((var fullName, var tagObj) in modLoaderTag)
+                {
+                    var tag = tagObj as TagCompound;
+                    int slotIndex;
+
+                    // Try to look up loaded slots with ModContent instead of searching ModAccessorySlotPlayer.slots right away, to account for legacy names
+                    if (ModContent.TryFind<ModAccessorySlot>(fullName, out var slot))
+                    {
+                        slotIndex = slot.Type;
+                    }
+                    // Unloaded slots are tracked in ModAccessorySlotPlayer.slots, so we get their index from there
+                    else if (modLoaderSlots.TryGetValue(fullName, out var index))
+                    {
+                        slotIndex = index;
+                    }
+                    else
+                    {
+                        // The slot is not currently loaded and the tML system that keeps track of unloaded slots with saved data doesn't recognize it,
+                        // so we're screwed.
+                        Mod.Logger.Error($"while loading ModAccessorySlot favorites: saved slot with full name \"{fullName}\" is neither loaded nor a known unloaded slot");
+                        continue;
+                    }
+
+                    modLoaderItems.FunctionalItems[slotIndex].favorited = tag.Get<bool>(ModLoaderFunctionalKey);
+                    modLoaderItems.VanityItems[slotIndex].favorited = tag.Get<bool>(ModLoaderVanityKey);
+                    modLoaderItems.Dye[slotIndex].favorited = tag.Get<bool>(ModLoaderDyeKey);
+                }
+            }
+        }
+
+        private void LoadData_0(TagCompound tag)
+        {
+            Item[] GetAllEquipsForAllLoadouts()
+            {
+                List<Item> allEquips = [];
+                for (int i = 0; i < Player.Loadouts.Length; i++)
+                {
+                    if (Player.CurrentLoadoutIndex == i)
+                    {
+                        allEquips.AddRange(Player.armor);
+                        allEquips.AddRange(Player.dye);
+                    }
+                    else
+                    {
+                        allEquips.AddRange(Player.Loadouts[i].Armor);
+                        allEquips.AddRange(Player.Loadouts[i].Dye);
+                    }
+                }
+                return allEquips.ToArray();
+            }
+
             var isFavoritedList = tag.GetList<bool>("favoritedEquips");
             Item[] allEquips = GetAllEquipsForAllLoadouts();
             for (int i = 0; i < allEquips.Length && i < isFavoritedList.Count; i++)
@@ -406,34 +615,29 @@ namespace TransferableLoadouts
                 allEquips[i].favorited = isFavoritedList[i];
             }
         }
-        public override void SaveData(TagCompound tag)// this WILL run when the game autosaves! it's not the same as onworldunload!
+
+        public (Item[] items, Item[] dye) GetVanillaItemsForLoadout(int loadoutIndex)
         {
-            var list = new List<bool>();
-            foreach (Item equip in GetAllEquipsForAllLoadouts())
+            if (loadoutIndex == LoadoutHelper.CurrentLoadoutIndex(Player))
             {
-                list.Add(equip.favorited);
+                return (Player.armor, Player.dye);
+            } else
+            {
+                var loadout = LoadoutHelper.GetLoadout(Player, loadoutIndex);
+                return (loadout.Armor, loadout.Dye);
             }
-            tag["favoritedEquips"] = list;
         }
 
-        // TODO Save favorited items in extra loadouts and mod accessory slots
-        public Item[] GetAllEquipsForAllLoadouts()
+        public LoadoutHelper.Advanced.IModLoaderSlotsView GetModLoaderItemsForLoadout(int loadoutIndex)
         {
-            List<Item> allEquips = [];
-            for (int i = 0; i < Player.Loadouts.Length; i++)
+            if (loadoutIndex == LoadoutHelper.CurrentLoadoutIndex(Player))
             {
-                if (Player.CurrentLoadoutIndex == i)
-                {
-                    allEquips.AddRange(Player.armor);
-                    allEquips.AddRange(Player.dye);
-                }
-                else
-                {
-                    allEquips.AddRange(Player.Loadouts[i].Armor);
-                    allEquips.AddRange(Player.Loadouts[i].Dye);
-                }
+                return LoadoutHelper.Advanced.GetModLoaderCurrentSlots(Player);
             }
-            return allEquips.ToArray();
+            else
+            {
+                return LoadoutHelper.Advanced.GetModLoaderLoadoutSlots(Player, loadoutIndex);
+            }
         }
     }
     public static class Utils
