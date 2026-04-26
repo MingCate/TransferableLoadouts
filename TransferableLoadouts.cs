@@ -5,7 +5,6 @@ using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
 using ReLogic.Content;
 using System;
-using System.CodeDom;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -297,9 +296,11 @@ namespace TransferableLoadouts
             if (success && wasFavorited)
             {
                 if (Main.LocalPlayer.armor.FirstOrDefault(item.IsTheSameAs) is Item equippedItem)
-                    Main.LocalPlayer.armor.First(item.IsTheSameAs).favorited = true;
+                    equippedItem.favorited = true;
 
-                // todo same but for modded
+                var modLoaderSlots = LoadoutHelper.Advanced.GetModLoaderCurrentSlots(Main.LocalPlayer);
+                if (modLoaderSlots.Items.FirstOrDefault(item.IsTheSameAs) is Item mEquippedItem)
+                    mEquippedItem.favorited = true;
             }
             return result;
         }
@@ -360,6 +361,7 @@ namespace TransferableLoadouts
             return true;
         }
     }
+
     public class TooltipChange : GlobalItem
     {
         //public static Item hoverItem;
@@ -377,6 +379,7 @@ namespace TransferableLoadouts
             }
         }
     }
+
     public class HoverItemTracker : ModSystem
     {
         public override void Load()
@@ -392,6 +395,7 @@ namespace TransferableLoadouts
                 global.worn = true;
         }
     }
+
     public class SaveFavoritedItems : ModPlayer //messing with vanilla I/O seems like a horrible idea
     {
         public const int CurrentDataVersion = 1;
@@ -621,7 +625,8 @@ namespace TransferableLoadouts
             if (loadoutIndex == LoadoutHelper.CurrentLoadoutIndex(Player))
             {
                 return (Player.armor, Player.dye);
-            } else
+            }
+            else
             {
                 var loadout = LoadoutHelper.GetLoadout(Player, loadoutIndex);
                 return (loadout.Armor, loadout.Dye);
@@ -640,6 +645,7 @@ namespace TransferableLoadouts
             }
         }
     }
+
     public static class Utils
     {
         public static bool IsTheSameAs(this Item item, Item compareItem)
@@ -668,159 +674,5 @@ namespace TransferableLoadouts
 
             return new Color(r, g, b, color.A);
         }
-        public static string ContextToString(int context)
-        {
-            // Get all public constant fields in ItemSlot.Context
-            var fields = typeof(ItemSlot.Context).GetFields(BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy);
-
-            foreach (var field in fields)
-            {
-                if (field.IsLiteral && !field.IsInitOnly)
-                {
-                    var fieldValue = (int)field.GetRawConstantValue();
-                    if (fieldValue == context)
-                        return field.Name;
-                }
-            }
-
-            return $"Unknown({context})";
-        }
     }
 }
-
-//    private void TrySwitchingLoadoutWithFavorites(On_Player.orig_TrySwitchingLoadout orig, Player self, int loadoutIndex)
-//    {
-//        // --- PRE-SWITCH CHECKS (Similar to vanilla) ---
-//        bool isPlayerBusy = self.itemTime > 0 || self.itemAnimation > 0;
-//        if (self.whoAmI != Main.myPlayer || isPlayerBusy || self.CCed || self.dead)
-//        {
-//            return; // Player is busy, cannot switch
-//        }
-
-//        if (loadoutIndex == self.CurrentLoadoutIndex || loadoutIndex < 0 || loadoutIndex >= self.Loadouts.Length)
-//        {
-//            return; // Invalid index or switching to the same loadout
-//        }
-
-//        int currentLoadoutIndex = self.CurrentLoadoutIndex;
-//        EquipmentLoadout oldLoadout = self.Loadouts[currentLoadoutIndex];
-//        EquipmentLoadout newLoadout = self.Loadouts[loadoutIndex];
-
-//        // --- ALGORITHM IMPLEMENTATION ---
-
-//        // Step 1: Return the player's current equipment to its corresponding loadout storage.
-//        // We do this for armor, accessories, and dyes.
-//        for (int i = 0; i < oldLoadout.Armor.Length; i++)
-//        {
-//            oldLoadout.Armor[i] = self.armor[i].Clone(); // Store a copy
-//            self.armor[i].TurnToAir(); // Clear the player's slot
-//        }
-//        for (int i = 0; i < oldLoadout.Dye.Length; i++)
-//        {
-//            oldLoadout.Dye[i] = self.dye[i].Clone();
-//            self.dye[i].TurnToAir();
-//        }
-//        // For visibility toggles, we just copy the value.
-//        for (int i = 0; i < oldLoadout.Hide.Length; i++)
-//        {
-//            oldLoadout.Hide[i] = self.hideVisibleAccessory[i];
-//        }
-
-
-//        // Step 2: Take all non-air items from the loadout you're swapping TO and equip them.
-//        // We clear the item from the new loadout's storage as we equip it.
-//        for (int i = 0; i < newLoadout.Armor.Length; i++)
-//        {
-//            if (!newLoadout.Armor[i].IsAir)
-//            {
-//                self.armor[i] = newLoadout.Armor[i].Clone();
-//                newLoadout.Armor[i].TurnToAir(); // Remove from storage
-//            }
-//        }
-//        for (int i = 0; i < newLoadout.Dye.Length; i++)
-//        {
-//            if (!newLoadout.Dye[i].IsAir)
-//            {
-//                self.dye[i] = newLoadout.Dye[i].Clone();
-//                newLoadout.Dye[i].TurnToAir();
-//            }
-//        }
-//        for (int i = 0; i < newLoadout.Hide.Length; i++)
-//        {
-//            self.hideVisibleAccessory[i] = newLoadout.Hide[i];
-//        }
-
-
-//        // Step 3: For each empty item slot, find the first loadout with a favorited item for that slot.
-//        // This searches through ALL loadouts (0, 1, 2) in order.
-
-//        // Armor and Accessories
-//        for (int i = 0; i < self.armor.Length; i++)
-//        {
-//            if (self.armor[i].IsAir) // Check if the slot is still empty
-//            {
-//                // Search all loadouts for a favorited item
-//                for (int j = 0; j < self.Loadouts.Length; j++)
-//                {
-//                    Item potentialItem = self.Loadouts[j].Armor[i];
-//                    if (!potentialItem.IsAir && potentialItem.favorited)
-//                    {
-//                        self.armor[i] = potentialItem.Clone(); // Equip the favorited item
-//                        potentialItem.TurnToAir(); // Remove it from its original storage
-//                        break; // Stop searching for this slot and move to the next
-//                    }
-//                }
-//            }
-//        }
-
-//        // Dyes
-//        for (int i = 0; i < self.dye.Length; i++)
-//        {
-//            if (self.dye[i].IsAir) // Check if the dye slot is empty
-//            {
-//                for (int j = 0; j < self.Loadouts.Length; j++)
-//                {
-//                    Item potentialDye = self.Loadouts[j].Dye[i];
-//                    if (!potentialDye.IsAir && potentialDye.favorited)
-//                    {
-//                        self.dye[i] = potentialDye.Clone();
-//                        potentialDye.TurnToAir();
-//                        break;
-//                    }
-//                }
-//            }
-//        }
-
-//        // --- FINALIZE THE SWITCH (Copied from vanilla) ---
-//        self.CurrentLoadoutIndex = loadoutIndex;
-
-//        // These calls are crucial for effects, sounds, and multiplayer synchronization.
-//        Main.mouseLeftRelease = false;
-//        ItemSlot.RecordLoadoutChange();
-//        SoundEngine.PlaySound(SoundID.Grab);
-//        NetMessage.TrySendData(MessageID.SyncLoadout, -1, -1, null, self.whoAmI, loadoutIndex); //TODO: this would need a custom senddata handler too, probably just use a modpacket
-//        ParticleOrchestrator.RequestParticleSpawn(clientOnly: false, ParticleOrchestraType.LoadoutChange, new ParticleOrchestraSettings
-//        {
-//            PositionInWorld = self.Center,
-//            UniqueInfoPiece = loadoutIndex
-//        }, self.whoAmI);
-//    }
-//}   
-/*
-            case 147:
-            {
-                int num209 = this.reader.ReadByte();
-                if (Main.netMode == 2)
-                {
-                    num209 = this.whoAmI;
-                }
-                int num219 = this.reader.ReadByte();
-                Main.player[num209].TrySwitchingLoadout(num219);
-                MessageBuffer.ReadAccessoryVisibility(this.reader, Main.player[num209].hideVisibleAccessory);
-                if (Main.netMode == 2)
-                {
-                    NetMessage.TrySendData(b, -1, num209, null, num209, num219);
-                }
-                break;
-            }
-*/

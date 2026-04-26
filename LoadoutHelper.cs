@@ -4,12 +4,17 @@ using Terraria;
 using Terraria.ModLoader;
 using Terraria.ModLoader.Default;
 
-// Replace with your mod's namespace
 namespace TransferableLoadouts;
 
 /// <summary>
+/// <para>
 /// This file is intended for mods which wish to support Extra Equipment Loadouts. It provides alternatives to <see cref="Player.Loadouts"/>, <see cref="Player.CurrentLoadoutIndex"/>, and <see cref="Player.TrySwitchingLoadout(int)"/> that additionally call ExtraEquipmentLoadouts if it is loaded.
 /// To use it, copy it into your mods source file and replace the namespaces above.
+/// </para>
+/// 
+/// <para>
+/// The most recent version of <see cref="LoadoutHelper"> can be found on Extra Equipment Loadouts' GitHub: https://github.com/pbone64/ExtraLoadouts
+/// </para>
 /// </summary>
 public static class LoadoutHelper
 {
@@ -167,6 +172,7 @@ public static class LoadoutHelper
 
         /// <summary>
         /// Gets the current <see cref="ModAccessorySlot"/> contents for <paramref name="player"/>. This is unrelated to loadouts, but it is provided as a convenience method to be used with <see cref="GetModLoaderLoadoutSlots(Player, int)"/>.
+        /// This will work even if Extra Equipment Loadouts is not loaded.
         /// </summary>
         /// <seealso cref="GetModLoaderLoadoutSlots(Player, int)"/>
         public static IModLoaderSlotsView GetModLoaderCurrentSlots(Player player)
