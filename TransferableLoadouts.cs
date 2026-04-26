@@ -19,6 +19,9 @@ namespace TransferableLoadouts
 {
     public class TransferableLoadouts : Mod
     {
+        /// <summary>
+        /// <see cref="ItemSlot"/> contexts indicating that this is an equipment slot
+        /// </summary>
         public static readonly int[] EquipSlots = [
             ItemSlot.Context.EquipArmor,
             ItemSlot.Context.EquipArmorVanity,
@@ -61,13 +64,6 @@ namespace TransferableLoadouts
                 canFavoriteAt[ItemSlot.Context.EquipAccessory] = true;
                 canFavoriteAt[ItemSlot.Context.EquipAccessoryVanity] = true;
                 canFavoriteAt[ItemSlot.Context.EquipDye] = true;
-
-                //Second page of equips
-                //canFavoriteAt[ItemSlot.Context.EquipGrapple] = true;
-                //canFavoriteAt[ItemSlot.Context.EquipMount] = true;
-                //canFavoriteAt[ItemSlot.Context.EquipMinecart] = true;
-                //canFavoriteAt[ItemSlot.Context.EquipPet] = true;
-                //canFavoriteAt[ItemSlot.Context.EquipLight] = true;
 
                 // Since we modified the array object directly, we don't need to call SetValue.
                 // The changes are already applied to the game's instance of the array.
@@ -134,6 +130,9 @@ namespace TransferableLoadouts
             c.EmitDelegate(CopyLoadoutFavoritesForModLoaderSlots);
         }
 
+        //TODO: possible design solution: only favorite one accessory per slot, or first loadout only. but then what if you have, e.g, wings,
+        //but you want to replace the wings with boots in the second slot if they're incompatible? just dont do that and use the same slot for wings always, i guess
+
         /// <summary>
         /// <para>Copies the favorited item from the same slot in the earliest loadout for every empty slot in the current loadout.</para>
         /// <para>Must be called every time loadouts switch.</para>
@@ -195,12 +194,9 @@ namespace TransferableLoadouts
         {
             int numLoadouts = LoadoutHelper.TotalLoadouts();
             var modPlayer = player.GetModPlayer<ModAccessorySlotPlayer>();
-            // tML creates unloaded slot entries at the end of the array so that players don't loose their items when they disable a mod that adds accessory slots
-            // For consistency, we only want to deal with loaded slots.
-            var loadedSlotCount = modPlayer.LoadedSlotCount;
+            var slotCount = modPlayer.SlotCount;
 
-            // TODO cleanup/consolodate
-            for (int i = 0; i < modPlayer.LoadedSlotCount; i++)
+            for (int i = 0; i < slotCount; i++)
             {
                 var accessorySlot = LoaderManager.Get<AccessorySlotLoader>().Get(i);
 
@@ -320,7 +316,7 @@ namespace TransferableLoadouts
                 spriteBatch.Draw(tex, position, null, borderColor, 0f, default, Main.inventoryScale, SpriteEffects.None, 0f);
             }
             //else
-            //orig(spriteBatch, inv, context, slot, position, lightColor);
+            //    orig(spriteBatch, inv, context, slot, position, lightColor);
         }
 
         /// <summary>
@@ -374,7 +370,7 @@ namespace TransferableLoadouts
             {
                 TooltipLine line = tooltips[i];
 
-                if (line.Name == "FavoriteDesc" && worn)//(item.wornArmor || worn))
+                if (line.Name == "FavoriteDesc" && worn)
                     tooltips[i] = new TooltipLine(Mod, "FavoriteEquipDesc", Language.GetText("Mods.TransferableLoadouts.FavoriteEquipDesc").Value);
             }
         }
@@ -386,6 +382,7 @@ namespace TransferableLoadouts
         {
             On_ItemSlot.MouseHover_ItemArray_int_int += GetHoverIndex;
         }
+
         //inv can be inventory, armor, shop, dye or hover item, or chest. we gotta use context.
         private void GetHoverIndex(On_ItemSlot.orig_MouseHover_ItemArray_int_int orig, Item[] inv, int context, int slot)
         {
