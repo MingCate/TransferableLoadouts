@@ -1,6 +1,6 @@
 Allows you to favorite armor, accessories, vanity items, and dyes, making them carry over to empty equipment slots when swapping loadouts.
 
-v1.2: Now compatible with Extended Equipment Loadouts and other mods that add custom slots, like Wing Slot! Huge thanks to pbone for this update. Go check out Extended Equipment Loadouts!
+v1.2: Now compatible with [url=https://steamcommunity.com/sharedfiles/filedetails/?id=2990396828] Extended Equipment Loadouts [/url] and other mods that add custom slots, like Wing Slot! Huge thanks to pbone for this update. Go check out Extended Equipment Loadouts!
 v1.1: Vanity now properly visually clears when swapping loadouts. No longer deletes items when used with Extended Equipment Loadouts. Added localizations. 
 
 Developed by MingCat, mod compatibility developed by pbone.
